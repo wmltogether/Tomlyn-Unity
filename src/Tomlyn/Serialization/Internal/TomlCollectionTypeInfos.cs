@@ -150,6 +150,29 @@ internal sealed class TomlListTypeInfo<TElement> : TomlTypeInfo<List<TElement>>
         return list;
     }
 
+    public override object? ReadInto(TomlReader reader, object? existingValue)
+    {
+        ArgumentGuard.ThrowIfNull(reader, nameof(reader));
+        if (existingValue is not List<TElement> list)
+        {
+            return Read(reader);
+        }
+
+        if (reader.TokenType != TomlTokenType.StartArray)
+        {
+            throw reader.CreateException($"Expected {TomlTokenType.StartArray} token but was {reader.TokenType}.");
+        }
+
+        reader.Read();
+        while (reader.TokenType != TomlTokenType.EndArray)
+        {
+            list.Add(ReadElement(reader));
+        }
+
+        reader.Read();
+        return list;
+    }
+
     private void EnsureElementTypeInfo()
     {
         if (_elementTypeInfo is not null)
@@ -239,6 +262,29 @@ internal sealed class TomlListBackedEnumerableTypeInfo<TEnumerable, TElement> : 
         return (TEnumerable)(object)list;
     }
 
+    public override object? ReadInto(TomlReader reader, object? existingValue)
+    {
+        ArgumentGuard.ThrowIfNull(reader, nameof(reader));
+        if (existingValue is not ICollection<TElement> collection)
+        {
+            return Read(reader);
+        }
+
+        if (reader.TokenType != TomlTokenType.StartArray)
+        {
+            throw reader.CreateException($"Expected {TomlTokenType.StartArray} token but was {reader.TokenType}.");
+        }
+
+        reader.Read();
+        while (reader.TokenType != TomlTokenType.EndArray)
+        {
+            collection.Add(ReadElement(reader));
+        }
+
+        reader.Read();
+        return existingValue;
+    }
+
     private void EnsureElementTypeInfo()
     {
         if (_elementTypeInfo is not null)
@@ -316,6 +362,29 @@ internal sealed class TomlHashSetTypeInfo<TElement> : TomlTypeInfo<HashSet<TElem
         }
 
         var set = new HashSet<TElement>();
+        reader.Read();
+        while (reader.TokenType != TomlTokenType.EndArray)
+        {
+            set.Add(ReadElement(reader));
+        }
+
+        reader.Read();
+        return set;
+    }
+
+    public override object? ReadInto(TomlReader reader, object? existingValue)
+    {
+        ArgumentGuard.ThrowIfNull(reader, nameof(reader));
+        if (existingValue is not HashSet<TElement> set)
+        {
+            return Read(reader);
+        }
+
+        if (reader.TokenType != TomlTokenType.StartArray)
+        {
+            throw reader.CreateException($"Expected {TomlTokenType.StartArray} token but was {reader.TokenType}.");
+        }
+
         reader.Read();
         while (reader.TokenType != TomlTokenType.EndArray)
         {
@@ -412,6 +481,29 @@ internal sealed class TomlHashSetBackedEnumerableTypeInfo<TEnumerable, TElement>
 
         reader.Read();
         return (TEnumerable)(object)set;
+    }
+
+    public override object? ReadInto(TomlReader reader, object? existingValue)
+    {
+        ArgumentGuard.ThrowIfNull(reader, nameof(reader));
+        if (existingValue is not ICollection<TElement> collection)
+        {
+            return Read(reader);
+        }
+
+        if (reader.TokenType != TomlTokenType.StartArray)
+        {
+            throw reader.CreateException($"Expected {TomlTokenType.StartArray} token but was {reader.TokenType}.");
+        }
+
+        reader.Read();
+        while (reader.TokenType != TomlTokenType.EndArray)
+        {
+            collection.Add(ReadElement(reader));
+        }
+
+        reader.Read();
+        return existingValue;
     }
 
     private void EnsureElementTypeInfo()
@@ -779,17 +871,89 @@ internal sealed class TomlDictionaryTypeInfo<TDictionary, TValue> : TomlTypeInfo
             }
 
             var key = reader.PropertyName!;
-            if (Options.DuplicateKeyHandling == TomlDuplicateKeyHandling.Error && dict.ContainsKey(key))
+            reader.Read();
+            if (Options.DuplicateKeyHandling == TomlDuplicateKeyHandling.Error &&
+                dict.TryGetValue(key, out var existingValue))
             {
+                if (TryReadTableHeaderExtension(reader, existingValue, out var mergedValue))
+                {
+                    dict[key] = mergedValue;
+                    continue;
+                }
+
                 throw reader.CreateException($"Duplicate key '{key}' was encountered.");
             }
 
-            reader.Read();
+            if (TomlTableHeaderExtensionHelper.IsTableHeaderExtension(reader) && dict.TryGetValue(key, out existingValue))
+            {
+                if (TryReadTableHeaderExtension(reader, existingValue, out var mergedValue))
+                {
+                    dict[key] = mergedValue;
+                    continue;
+                }
+            }
+
             dict[key] = ReadValue(reader);
         }
 
         reader.Read();
         return (TDictionary)(object)dict;
+    }
+
+    public override object? ReadInto(TomlReader reader, object? existingValue)
+    {
+        ArgumentGuard.ThrowIfNull(reader, nameof(reader));
+        if (existingValue is not IDictionary<string, TValue> dict)
+        {
+            return Read(reader);
+        }
+
+        if (reader.TokenType != TomlTokenType.StartTable)
+        {
+            throw reader.CreateException($"Expected {TomlTokenType.StartTable} token but was {reader.TokenType}.");
+        }
+
+        HashSet<string>? seen = null;
+        if (Options.DuplicateKeyHandling == TomlDuplicateKeyHandling.Error)
+        {
+            seen = new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        reader.Read();
+        while (reader.TokenType != TomlTokenType.EndTable)
+        {
+            if (reader.TokenType != TomlTokenType.PropertyName)
+            {
+                throw reader.CreateException($"Expected {TomlTokenType.PropertyName} token but was {reader.TokenType}.");
+            }
+
+            var key = reader.PropertyName!;
+            reader.Read();
+            if (seen is not null && !seen.Add(key))
+            {
+                if (dict.TryGetValue(key, out var duplicateExistingValue) && TryReadTableHeaderExtension(reader, duplicateExistingValue, out var mergedValue))
+                {
+                    dict[key] = mergedValue;
+                    continue;
+                }
+
+                throw reader.CreateException($"Duplicate key '{key}' was encountered.");
+            }
+
+            if (TomlTableHeaderExtensionHelper.IsTableHeaderExtension(reader) && dict.TryGetValue(key, out var currentValue))
+            {
+                if (TryReadTableHeaderExtension(reader, currentValue, out var mergedValue))
+                {
+                    dict[key] = mergedValue;
+                    continue;
+                }
+            }
+
+            dict[key] = ReadValue(reader);
+        }
+
+        reader.Read();
+        return existingValue;
     }
 
     private void EnsureValueTypeInfo()
@@ -832,5 +996,19 @@ internal sealed class TomlDictionaryTypeInfo<TDictionary, TValue> : TomlTypeInfo
         }
 
         return (TValue)_valueTypeInfo!.ReadAsObject(reader)!;
+    }
+
+    private bool TryReadTableHeaderExtension(TomlReader reader, TValue existingValue, out TValue mergedValue)
+    {
+        EnsureValueTypeInfo();
+
+        if (!TomlTableHeaderExtensionHelper.TryReadIntoExisting(reader, existingValue, _valueTypeInfo!, out var merged))
+        {
+            mergedValue = existingValue;
+            return false;
+        }
+
+        mergedValue = (TValue)merged!;
+        return true;
     }
 }

@@ -131,6 +131,7 @@ internal static class TomlReflectionTypeInfoResolver
     {
         var properties = type.GetProperties(BindingFlags.Instance | BindingFlags.Public);
         var members = new List<MemberModel>(properties.Length);
+        var typeObjectCreationHandling = GetObjectCreationHandling(type, options);
 
         foreach (var property in properties)
         {
@@ -176,6 +177,9 @@ internal static class TomlReflectionTypeInfoResolver
                 GetOrder(property),
                 ignore.WriteIgnoreCondition,
                 GetDefaultValue(property.PropertyType),
+                GetObjectCreationHandling(property, typeObjectCreationHandling),
+                HasExplicitObjectCreationHandling(property),
+                HasSingleOrArrayAttribute(property),
                 IsRequired(property),
                 IsExtensionData(property),
                 TryCreateMemberConverter(property, property.PropertyType, options)));
@@ -216,6 +220,9 @@ internal static class TomlReflectionTypeInfoResolver
                 GetOrder(field),
                 ignore.WriteIgnoreCondition,
                 GetDefaultValue(field.FieldType),
+                GetObjectCreationHandling(field, typeObjectCreationHandling),
+                HasExplicitObjectCreationHandling(field),
+                HasSingleOrArrayAttribute(field),
                 IsRequired(field),
                 IsExtensionData(field),
                 TryCreateMemberConverter(field, field.FieldType, options)));
@@ -397,6 +404,33 @@ internal static class TomlReflectionTypeInfoResolver
         }
     }
 
+    private static JsonObjectCreationHandling GetObjectCreationHandling(Type type, TomlSerializerOptions options)
+    {
+        var attribute = type.GetCustomAttribute<JsonObjectCreationHandlingAttribute>(inherit: true);
+        return attribute?.Handling ?? options.PreferredObjectCreationHandling;
+    }
+
+    private static JsonObjectCreationHandling GetObjectCreationHandling(MemberInfo member, JsonObjectCreationHandling declaringTypeHandling)
+    {
+        var attribute = member.GetCustomAttribute<JsonObjectCreationHandlingAttribute>(inherit: true);
+        if (attribute is not null)
+        {
+            return attribute.Handling;
+        }
+
+        return declaringTypeHandling;
+    }
+
+    private static bool HasExplicitObjectCreationHandling(MemberInfo member)
+    {
+        return member.IsDefined(typeof(JsonObjectCreationHandlingAttribute), inherit: true);
+    }
+
+    private static bool HasSingleOrArrayAttribute(MemberInfo member)
+    {
+        return member.IsDefined(typeof(TomlSingleOrArrayAttribute), inherit: true);
+    }
+
     private static string? GetSerializedName(MemberInfo member, string defaultName, TomlSerializerOptions options)
     {
         var tomlName = member.GetCustomAttribute<TomlPropertyNameAttribute>(inherit: true);
@@ -470,6 +504,9 @@ internal static class TomlReflectionTypeInfoResolver
         int Order,
         TomlIgnoreCondition? WriteIgnoreCondition,
         object? DefaultValue,
+        JsonObjectCreationHandling ObjectCreationHandling,
+        bool HasExplicitObjectCreationHandling,
+        bool HasSingleOrArray,
         bool IsRequired,
         bool IsExtensionData,
         TomlConverter? Converter);
@@ -656,7 +693,7 @@ internal static class TomlReflectionTypeInfoResolver
                 }
                 else
                 {
-                    var typeInfo = TomlTypeInfoResolverPipeline.Resolve(Options, member.MemberType);
+                    var typeInfo = writer.ResolveTypeInfo(member.MemberType);
                     typeInfo.Write(writer, memberValue);
                 }
             }
@@ -691,7 +728,7 @@ internal static class TomlReflectionTypeInfoResolver
                         }
                         else
                         {
-                            var typeInfo = TomlTypeInfoResolverPipeline.Resolve(Options, _extensionDataValueType!);
+                            var typeInfo = writer.ResolveTypeInfo(_extensionDataValueType!);
                             typeInfo.Write(writer, entry.Value);
                         }
                     }
@@ -723,7 +760,29 @@ internal static class TomlReflectionTypeInfoResolver
             }
 
             var instance = CreateInstance();
-            if (_invokeOnDeserializing)
+            return ReadIntoExistingInstance(reader, instance, tableStartSpan, invokeDeserializingCallback: true);
+        }
+
+        public override object? ReadInto(TomlReader reader, object? existingValue)
+        {
+            ArgumentGuard.ThrowIfNull(reader, nameof(reader));
+
+            if (existingValue is null || !Type.IsInstanceOfType(existingValue))
+            {
+                return base.ReadInto(reader, existingValue);
+            }
+
+            if (reader.TokenType != TomlTokenType.StartTable)
+            {
+                throw reader.CreateException($"Expected {TomlTokenType.StartTable} token but was {reader.TokenType}.");
+            }
+
+            return ReadIntoExistingInstance(reader, existingValue, reader.CurrentSpan, invokeDeserializingCallback: true);
+        }
+
+        private object ReadIntoExistingInstance(TomlReader reader, object instance, TomlSourceSpan? tableStartSpan, bool invokeDeserializingCallback)
+        {
+            if (invokeDeserializingCallback && _invokeOnDeserializing)
             {
                 ((ITomlOnDeserializing)instance).OnTomlDeserializing();
             }
@@ -733,6 +792,7 @@ internal static class TomlReflectionTypeInfoResolver
             {
                 propertiesMetadata = new TomlPropertiesMetadata();
             }
+
             var needsSeen = Options.DuplicateKeyHandling == TomlDuplicateKeyHandling.Error || _hasRequiredMembers;
             var seen = needsSeen ? new bool[_members.Count] : null;
 
@@ -752,8 +812,14 @@ internal static class TomlReflectionTypeInfoResolver
 
                 if (_indexByName.TryGetValue(name, out var memberIndex))
                 {
+                    var member = _members[memberIndex];
                     if (seen is not null && seen[memberIndex])
                     {
+                        if (TryReadTableHeaderExtension(reader, instance, member))
+                        {
+                            continue;
+                        }
+
                         throw reader.CreateException($"Duplicate key '{name}' was encountered.");
                     }
 
@@ -762,24 +828,18 @@ internal static class TomlReflectionTypeInfoResolver
                         seen[memberIndex] = true;
                     }
 
-                    var member = _members[memberIndex];
-                    if (member.Setter is null)
+                    if (member.Setter is null && member.ObjectCreationHandling != JsonObjectCreationHandling.Populate && !member.HasSingleOrArray)
                     {
                         reader.Skip();
                         continue;
                     }
 
-                    object? memberValue;
-                    if (member.Converter is { } converter)
+                    var memberValue = ReadMemberValue(reader, instance, member);
+                    if (member.Setter is not null)
                     {
-                        memberValue = converter.Read(reader, member.MemberType);
+                        member.Setter(instance, memberValue);
                     }
-                    else
-                    {
-                        var typeInfo = TomlTypeInfoResolverPipeline.Resolve(Options, member.MemberType);
-                        memberValue = typeInfo.ReadAsObject(reader);
-                    }
-                    member.Setter(instance, memberValue);
+
                     continue;
                 }
 
@@ -813,6 +873,158 @@ internal static class TomlReflectionTypeInfoResolver
             }
 
             return instance;
+        }
+
+        private object? ReadMemberValue(TomlReader reader, object instance, MemberModel member)
+        {
+            if (member.HasSingleOrArray)
+            {
+                return ReadSingleOrArrayMemberValue(reader, instance, member);
+            }
+
+            if (member.ObjectCreationHandling != JsonObjectCreationHandling.Populate)
+            {
+                return ReadMemberValue(reader, member);
+            }
+
+            var existingValue = member.Getter(instance);
+            return ReadMemberValueWithPopulate(reader, member, existingValue);
+        }
+
+        private object? ReadMemberValue(TomlReader reader, MemberModel member)
+        {
+            if (member.Converter is { } converter)
+            {
+                return converter.Read(reader, member.MemberType);
+            }
+
+            var typeInfo = reader.ResolveTypeInfo(member.MemberType);
+            return typeInfo.ReadAsObject(reader);
+        }
+
+        private object? ReadMemberValueWithPopulate(TomlReader reader, MemberModel member, object? existingValue)
+        {
+            if (member.MemberType.IsValueType && member.Setter is null)
+            {
+                if (member.HasExplicitObjectCreationHandling)
+                {
+                    throw reader.CreateException(
+                        $"Member '{member.Member.Name}' on '{Type.FullName}' uses {nameof(JsonObjectCreationHandling)}.{nameof(JsonObjectCreationHandling.Populate)} but requires a setter because '{member.MemberType.FullName}' is a value type.");
+                }
+
+                reader.Skip();
+                return existingValue;
+            }
+
+            if (existingValue is null)
+            {
+                if (member.Setter is null)
+                {
+                    reader.Skip();
+                    return null;
+                }
+
+                return ReadMemberValue(reader, member);
+            }
+
+            object? populatedValue;
+            if (member.Converter is { } converter)
+            {
+                populatedValue = converter.Read(reader, member.MemberType);
+            }
+            else
+            {
+                var typeInfo = reader.ResolveTypeInfo(member.MemberType);
+                populatedValue = typeInfo.ReadInto(reader, existingValue);
+            }
+
+            if (member.Setter is null)
+            {
+                if (!ReferenceEquals(existingValue, populatedValue))
+                {
+                    if (member.HasExplicitObjectCreationHandling)
+                    {
+                        throw reader.CreateException(
+                            $"Member '{member.Member.Name}' on '{Type.FullName}' uses {nameof(JsonObjectCreationHandling)}.{nameof(JsonObjectCreationHandling.Populate)} but '{member.MemberType.FullName}' doesn't support populating.");
+                    }
+
+                    return existingValue;
+                }
+
+                return existingValue;
+            }
+
+            return populatedValue;
+        }
+
+        private object? ReadSingleOrArrayMemberValue(TomlReader reader, object instance, MemberModel member)
+        {
+            var existingValue = member.Getter(instance);
+            var shouldPopulateExisting = existingValue is not null && (member.Setter is null || member.ObjectCreationHandling == JsonObjectCreationHandling.Populate);
+
+            if (reader.TokenType == TomlTokenType.StartArray)
+            {
+                if (!shouldPopulateExisting)
+                {
+                    return ReadMemberValue(reader, member);
+                }
+
+                if (!reader.OperationState.SingleOrArrayCollections.CanPopulate(member.MemberType, existingValue!))
+                {
+                    if (member.Setter is null)
+                    {
+                        throw reader.CreateException(
+                            $"Member '{member.Member.Name}' on '{Type.FullName}' uses [TomlSingleOrArray] but '{member.MemberType.FullName}' doesn't support populating the existing collection.");
+                    }
+
+                    return ReadMemberValue(reader, member);
+                }
+
+                if (member.Converter is { } converter)
+                {
+                    return converter.Read(reader, member.MemberType);
+                }
+
+                var typeInfo = reader.ResolveTypeInfo(member.MemberType);
+                var populatedValue = typeInfo.ReadInto(reader, existingValue);
+                if (member.Setter is null && !ReferenceEquals(existingValue, populatedValue))
+                {
+                    throw reader.CreateException(
+                        $"Member '{member.Member.Name}' on '{Type.FullName}' uses [TomlSingleOrArray] but '{member.MemberType.FullName}' doesn't support populating the existing collection.");
+                }
+
+                return populatedValue;
+            }
+
+            if (!reader.OperationState.SingleOrArrayCollections.IsSupported(member.MemberType))
+            {
+                throw reader.CreateException(
+                    $"Member '{member.Member.Name}' on '{Type.FullName}' uses [TomlSingleOrArray] but '{member.MemberType.FullName}' is not a supported collection type.");
+            }
+
+            if (shouldPopulateExisting)
+            {
+                if (!reader.OperationState.SingleOrArrayCollections.CanPopulate(member.MemberType, existingValue!))
+                {
+                    if (member.Setter is null)
+                    {
+                        throw reader.CreateException(
+                            $"Member '{member.Member.Name}' on '{Type.FullName}' uses [TomlSingleOrArray] but '{member.MemberType.FullName}' doesn't support populating the existing collection.");
+                    }
+
+                    return reader.OperationState.SingleOrArrayCollections.ReadSingleElementAsCollection(reader, member.MemberType);
+                }
+
+                return reader.OperationState.SingleOrArrayCollections.ReadSingleElementIntoExisting(reader, member.MemberType, existingValue!);
+            }
+
+            if (member.Setter is null)
+            {
+                throw reader.CreateException(
+                    $"Member '{member.Member.Name}' on '{Type.FullName}' uses [TomlSingleOrArray] but the existing collection is null or cannot be populated.");
+            }
+
+            return reader.OperationState.SingleOrArrayCollections.ReadSingleElementAsCollection(reader, member.MemberType);
         }
 
         private object CreateInstance()
@@ -890,7 +1102,7 @@ internal static class TomlReflectionTypeInfoResolver
                 return TomlUntypedObjectConverter.ReadValue(reader);
             }
 
-            var typeInfo = TomlTypeInfoResolverPipeline.Resolve(Options, _extensionDataValueType!);
+            var typeInfo = reader.ResolveTypeInfo(_extensionDataValueType!);
             return typeInfo.ReadAsObject(reader);
         }
 
@@ -926,6 +1138,19 @@ internal static class TomlReflectionTypeInfoResolver
                 {
                     if (ctorSeen[parameterIndex] && Options.DuplicateKeyHandling == TomlDuplicateKeyHandling.Error)
                     {
+                        var duplicateBinding = _parameters[parameterIndex];
+                        if (TryReadTableHeaderExtension(reader, ctorArgs, parameterIndex, duplicateBinding.ParameterType, out var updatedArgument))
+                        {
+                            ctorArgs[parameterIndex] = updatedArgument;
+                            if (duplicateBinding.MemberIndex is { } duplicateLinkedMemberIndex && duplicateLinkedMemberIndex >= 0 && duplicateLinkedMemberIndex < _members.Count)
+                            {
+                                memberSeen[duplicateLinkedMemberIndex] = true;
+                                memberValues[duplicateLinkedMemberIndex] = updatedArgument;
+                            }
+
+                            continue;
+                        }
+
                         throw reader.CreateException($"Duplicate key '{name}' was encountered.");
                     }
 
@@ -945,7 +1170,7 @@ internal static class TomlReflectionTypeInfoResolver
                     }
                     else
                     {
-                        var typeInfo = TomlTypeInfoResolverPipeline.Resolve(Options, binding.ParameterType);
+                        var typeInfo = reader.ResolveTypeInfo(binding.ParameterType);
                         value = typeInfo.ReadAsObject(reader);
                     }
                     ctorArgs[parameterIndex] = value;
@@ -963,26 +1188,36 @@ internal static class TomlReflectionTypeInfoResolver
                 {
                     if (memberSeen[memberIndex] && Options.DuplicateKeyHandling == TomlDuplicateKeyHandling.Error)
                     {
+                        var duplicateMember = _members[memberIndex];
+                        if (TryReadTableHeaderExtension(reader, memberValues, memberIndex, duplicateMember))
+                        {
+                            continue;
+                        }
+
                         throw reader.CreateException($"Duplicate key '{name}' was encountered.");
                     }
 
                     memberSeen[memberIndex] = true;
                     var member = _members[memberIndex];
 
-                    if (member.Setter is null)
+                    if (member.Setter is null && !member.HasSingleOrArray)
                     {
                         reader.Skip();
                         continue;
                     }
 
                     object? value;
-                    if (member.Converter is { } converter)
+                    if (member.HasSingleOrArray && reader.TokenType != TomlTokenType.StartArray)
+                    {
+                        value = reader.OperationState.SingleOrArrayCollections.ReadSingleElementAsCollection(reader, member.MemberType);
+                    }
+                    else if (member.Converter is { } converter)
                     {
                         value = converter.Read(reader, member.MemberType);
                     }
                     else
                     {
-                        var typeInfo = TomlTypeInfoResolverPipeline.Resolve(Options, member.MemberType);
+                        var typeInfo = reader.ResolveTypeInfo(member.MemberType);
                         value = typeInfo.ReadAsObject(reader);
                     }
                     memberValues[memberIndex] = value;
@@ -1049,6 +1284,22 @@ internal static class TomlReflectionTypeInfoResolver
                 var member = _members[i];
                 if (member.Setter is null)
                 {
+                    if (member.HasSingleOrArray)
+                    {
+                        var existingValue = member.Getter(instance);
+                        if (existingValue is null)
+                        {
+                            throw new TomlException($"Member '{member.Member.Name}' on '{Type.FullName}' uses [TomlSingleOrArray] but the existing collection is null or cannot be populated.");
+                        }
+
+                        if (!reader.OperationState.SingleOrArrayCollections.CanPopulate(member.MemberType, existingValue))
+                        {
+                            throw new TomlException($"Member '{member.Member.Name}' on '{Type.FullName}' uses [TomlSingleOrArray] but '{member.MemberType.FullName}' doesn't support populating the existing collection.");
+                        }
+
+                        reader.OperationState.SingleOrArrayCollections.PopulateExistingFromCollection(member.MemberType, existingValue, memberValues[i]!);
+                    }
+
                     continue;
                 }
 
@@ -1075,6 +1326,68 @@ internal static class TomlReflectionTypeInfoResolver
             }
 
             return instance;
+        }
+
+        private bool TryReadTableHeaderExtension(TomlReader reader, object instance, MemberModel member)
+        {
+            if (member.Converter is not null)
+            {
+                return false;
+            }
+
+            var existingValue = member.Getter(instance);
+            if (existingValue is null)
+            {
+                return false;
+            }
+
+            var typeInfo = reader.ResolveTypeInfo(member.MemberType);
+            if (!TomlTableHeaderExtensionHelper.TryReadIntoExisting(reader, existingValue, typeInfo, out var populatedValue))
+            {
+                return false;
+            }
+
+            if (member.Setter is not null)
+            {
+                member.Setter(instance, populatedValue);
+                return true;
+            }
+
+            if (!ReferenceEquals(existingValue, populatedValue))
+            {
+                throw reader.CreateException(
+                    $"Member '{member.Member.Name}' on '{Type.FullName}' cannot be extended by an additional TOML table definition because '{member.MemberType.FullName}' does not support in-place population.");
+            }
+
+            return true;
+        }
+
+        private bool TryReadTableHeaderExtension(TomlReader reader, object?[] values, int index, Type valueType, out object? populatedValue)
+        {
+            populatedValue = values[index];
+            if (populatedValue is null)
+            {
+                return false;
+            }
+
+            var typeInfo = reader.ResolveTypeInfo(valueType);
+            return TomlTableHeaderExtensionHelper.TryReadIntoExisting(reader, populatedValue, typeInfo, out populatedValue);
+        }
+
+        private bool TryReadTableHeaderExtension(TomlReader reader, object?[] values, int index, MemberModel member)
+        {
+            if (member.Converter is not null)
+            {
+                return false;
+            }
+
+            if (!TryReadTableHeaderExtension(reader, values, index, member.MemberType, out var populatedValue))
+            {
+                return false;
+            }
+
+            values[index] = populatedValue;
+            return true;
         }
 
         private static void CapturePropertyMetadata(

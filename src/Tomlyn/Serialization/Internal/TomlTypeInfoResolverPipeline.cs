@@ -3,13 +3,11 @@
 // See license.txt file in the project root for full license information.
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
-using System.Runtime.CompilerServices;
-using Newtonsoft.Json;
+using System.Text.Json.Serialization;
 using Tomlyn.Helpers;
 using Tomlyn.Serialization;
 
@@ -17,35 +15,41 @@ namespace Tomlyn.Serialization.Internal;
 
 internal static class TomlTypeInfoResolverPipeline
 {
-    private const string ReflectionBasedSerializationMessage =
+    internal const string ReflectionBasedSerializationMessage =
         "Reflection-based TOML serialization is not compatible with trimming/NativeAOT. " +
         "Use a source-generated TomlSerializerContext or pass a TomlTypeInfo instance.";
-
-    private static readonly ConditionalWeakTable<TomlSerializerOptions, ConcurrentDictionary<Type, TomlTypeInfo>>
-        CacheByOptions = new();
+    private const string ReflectionSwitchName = TomlSerializerFeatureSwitches.ReflectionSwitchName;
 
     [RequiresUnreferencedCode(ReflectionBasedSerializationMessage)]
     [RequiresDynamicCode(ReflectionBasedSerializationMessage)]
     public static TomlTypeInfo Resolve(TomlSerializerOptions options, Type type)
     {
         ArgumentGuard.ThrowIfNull(options, nameof(options));
+        return Resolve(new TomlSerializationOperationState(options), type);
+    }
+
+    [RequiresUnreferencedCode(ReflectionBasedSerializationMessage)]
+    [RequiresDynamicCode(ReflectionBasedSerializationMessage)]
+    public static TomlTypeInfo Resolve(TomlSerializationOperationState state, Type type)
+    {
+        ArgumentGuard.ThrowIfNull(state, nameof(state));
         ArgumentGuard.ThrowIfNull(type, nameof(type));
 
-        var cache = CacheByOptions.GetOrCreateValue(options);
-        if (cache.TryGetValue(type, out var cached))
+        if (state.TryGetCachedTypeInfo(type, out var cached))
         {
             return cached;
         }
 
-        var resolved = ResolveUncached(options, type);
-        cache.TryAdd(type, resolved);
+        var resolved = ResolveUncached(state, type);
+        state.CacheTypeInfo(type, resolved);
         return resolved;
     }
 
     [RequiresUnreferencedCode(ReflectionBasedSerializationMessage)]
     [RequiresDynamicCode(ReflectionBasedSerializationMessage)]
-    private static TomlTypeInfo ResolveUncached(TomlSerializerOptions options, Type type)
+    private static TomlTypeInfo ResolveUncached(TomlSerializationOperationState state, Type type)
     {
+        var options = state.Options;
         var fromTypeConverterAttribute = TryResolveFromConverterAttributes(options, type);
         if (fromTypeConverterAttribute is not null)
         {
@@ -70,7 +74,7 @@ internal static class TomlTypeInfoResolverPipeline
             return TomlPolymorphicTypeInfo.TryWrap(builtIn);
         }
 
-        var nullable = TryResolveNullable(type, options);
+        var nullable = TryResolveNullable(type, state);
         if (nullable is not null)
         {
             return nullable;
@@ -82,7 +86,7 @@ internal static class TomlTypeInfoResolverPipeline
                 $"Dictionaries must have string keys to be representable as TOML tables. Type '{type.FullName}' is not supported without a custom converter.");
         }
 
-        if (TomlSerializerFeatureSwitches.IsReflectionEnabledByDefaultCalculated)
+        if (TomlSerializer.IsReflectionEnabledByDefault)
         {
             var typeInfo = ResolveFromReflection(options, type);
             return TomlPolymorphicTypeInfo.TryWrap(typeInfo);
@@ -95,13 +99,14 @@ internal static class TomlTypeInfoResolverPipeline
         }
 
         throw new TomlException(
-            $"No TOML metadata is available for type '{type.FullName}'. " +
-            $"Provide {nameof(TomlSerializerOptions)}.{nameof(TomlSerializerOptions.TypeInfoResolver)} (source generation) or a custom resolver.");
+            $"Reflection serialization is disabled and no TOML metadata was found for type '{type.FullName}'. " +
+            $"Provide {nameof(TomlSerializerOptions)}.{nameof(TomlSerializerOptions.TypeInfoResolver)} (source generation) or a custom resolver, " +
+            $"or enable the '{ReflectionSwitchName}' AppContext switch.");
     }
 
     [RequiresUnreferencedCode(ReflectionBasedSerializationMessage)]
     [RequiresDynamicCode(ReflectionBasedSerializationMessage)]
-    private static TomlTypeInfo? TryResolveNullable(Type type, TomlSerializerOptions options)
+    private static TomlTypeInfo? TryResolveNullable(Type type, TomlSerializationOperationState state)
     {
         var underlyingType = Nullable.GetUnderlyingType(type);
         if (underlyingType is null)
@@ -109,12 +114,11 @@ internal static class TomlTypeInfoResolverPipeline
             return null;
         }
 
-        var inner = Resolve(options, underlyingType);
-        return new TomlUntypedNullableTypeInfo(type, options, inner);
+        var inner = Resolve(state, underlyingType);
+        return new TomlUntypedNullableTypeInfo(type, state.Options, inner);
     }
 
-    private static bool IsNonStringKeyDictionary(
-        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.Interfaces)] Type type)
+    private static bool IsNonStringKeyDictionary([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.Interfaces)] Type type)
     {
         if (type == typeof(string))
         {
@@ -171,24 +175,29 @@ internal static class TomlTypeInfoResolverPipeline
             var converter = CreateConverterFromAttribute(tomlConverterAttribute.ConverterType, type, options);
             return new ConverterTomlTypeInfo(type, options, converter);
         }
+
+        var jsonConverterAttribute = type.GetCustomAttribute<JsonConverterAttribute>(inherit: true);
+        if (jsonConverterAttribute is not null && jsonConverterAttribute.ConverterType is not null)
+        {
+            var converter = CreateConverterFromAttribute(jsonConverterAttribute.ConverterType, type, options);
+            return new ConverterTomlTypeInfo(type, options, converter);
+        }
+
         return null;
     }
 
     [RequiresUnreferencedCode(ReflectionBasedSerializationMessage)]
     [RequiresDynamicCode(ReflectionBasedSerializationMessage)]
-    private static TomlConverter CreateConverterFromAttribute(Type converterType, Type typeToConvert,
-        TomlSerializerOptions options)
+    private static TomlConverter CreateConverterFromAttribute(Type converterType, Type typeToConvert, TomlSerializerOptions options)
     {
         if (!typeof(TomlConverter).IsAssignableFrom(converterType))
         {
-            throw new TomlException(
-                $"Converter type '{converterType.FullName}' must derive from '{typeof(TomlConverter).FullName}'.");
+            throw new TomlException($"Converter type '{converterType.FullName}' must derive from '{typeof(TomlConverter).FullName}'.");
         }
 
         if (converterType.GetConstructor(Type.EmptyTypes) is null)
         {
-            throw new TomlException(
-                $"Converter type '{converterType.FullName}' must declare a public parameterless constructor.");
+            throw new TomlException($"Converter type '{converterType.FullName}' must declare a public parameterless constructor.");
         }
 
         TomlConverter converter;
@@ -211,8 +220,7 @@ internal static class TomlTypeInfoResolverPipeline
 
             if (created is TomlConverterFactory)
             {
-                throw new TomlException(
-                    $"The converter factory '{factory.GetType().FullName}' returned another {nameof(TomlConverterFactory)}.");
+                throw new TomlException($"The converter factory '{factory.GetType().FullName}' returned another {nameof(TomlConverterFactory)}.");
             }
 
             if (!created.CanConvert(typeToConvert))
@@ -258,8 +266,7 @@ internal static class TomlTypeInfoResolverPipeline
 
                 if (created is TomlConverterFactory)
                 {
-                    throw new TomlException(
-                        $"The converter factory '{factory.GetType().FullName}' returned another {nameof(TomlConverterFactory)}.");
+                    throw new TomlException($"The converter factory '{factory.GetType().FullName}' returned another {nameof(TomlConverterFactory)}.");
                 }
 
                 if (!created.CanConvert(type))

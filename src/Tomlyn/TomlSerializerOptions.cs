@@ -5,6 +5,8 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Tomlyn.Helpers;
 using Tomlyn.Serialization;
 
@@ -75,12 +77,29 @@ public sealed record TomlSerializerOptions
     /// <summary>
     /// Gets or sets the policy used to convert CLR property names.
     /// </summary>
-    public TomlNamingPolicy? PropertyNamingPolicy { get; init; }
+    public JsonNamingPolicy? PropertyNamingPolicy { get; init; }
 
     /// <summary>
     /// Gets or sets the policy used to convert dictionary keys during serialization.
     /// </summary>
-    public TomlNamingPolicy? DictionaryKeyPolicy { get; init; }
+    public JsonNamingPolicy? DictionaryKeyPolicy { get; init; }
+
+    /// <summary>
+    /// Gets or sets the preferred object creation handling when deserializing object and collection members.
+    /// </summary>
+    public JsonObjectCreationHandling PreferredObjectCreationHandling
+    {
+        get;
+        init
+        {
+            if (value is not JsonObjectCreationHandling.Replace and not JsonObjectCreationHandling.Populate)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), value, "Preferred object creation handling must be Replace or Populate.");
+            }
+
+            field = value;
+        }
+    } = JsonObjectCreationHandling.Replace;
 
     /// <summary>
     /// Gets or sets a value indicating whether property name matching is case-insensitive.
@@ -399,7 +418,11 @@ public enum TomlUnknownDerivedTypeHandling
 /// </summary>
 public sealed record TomlPolymorphismOptions
 {
+    private static readonly IReadOnlyDictionary<Type, IReadOnlyList<TomlDerivedType>> EmptyDerivedTypeMappings =
+        new ReadOnlyDictionary<Type, IReadOnlyList<TomlDerivedType>>(new Dictionary<Type, IReadOnlyList<TomlDerivedType>>());
+
     private TomlUnknownDerivedTypeHandling _unknownDerivedTypeHandling = TomlUnknownDerivedTypeHandling.Fail;
+    private IReadOnlyDictionary<Type, IReadOnlyList<TomlDerivedType>> _derivedTypeMappings = EmptyDerivedTypeMappings;
 
     /// <summary>
     /// Gets the property name used for discriminator-based polymorphism.
@@ -421,6 +444,61 @@ public sealed record TomlPolymorphismOptions
             }
 
             _unknownDerivedTypeHandling = value;
+        }
+    }
+
+    /// <summary>
+    /// Gets runtime-registered derived type mappings, keyed by polymorphic base type.
+    /// </summary>
+    /// <remarks>
+    /// These mappings are used by reflection-based serialization and are merged with attribute-based registrations.
+    /// Base-type attributes take precedence when the same derived type or discriminator is registered in both places.
+    /// </remarks>
+    public IReadOnlyDictionary<Type, IReadOnlyList<TomlDerivedType>> DerivedTypeMappings
+    {
+        get => _derivedTypeMappings;
+        init
+        {
+            if (value is null)
+            {
+                throw new ArgumentNullException(nameof(value));
+            }
+
+            if (value.Count == 0)
+            {
+                _derivedTypeMappings = EmptyDerivedTypeMappings;
+                return;
+            }
+
+            var copy = new Dictionary<Type, IReadOnlyList<TomlDerivedType>>(value.Count);
+            foreach (var pair in value)
+            {
+                if (pair.Key is null)
+                {
+                    throw new ArgumentException("Derived type mapping base types cannot be null.", nameof(value));
+                }
+
+                if (pair.Value is null)
+                {
+                    throw new ArgumentException($"Derived type mappings for '{pair.Key}' cannot be null.", nameof(value));
+                }
+
+                var derivedTypes = new TomlDerivedType[pair.Value.Count];
+                for (var i = 0; i < derivedTypes.Length; i++)
+                {
+                    var entry = pair.Value[i];
+                    if (entry is null)
+                    {
+                        throw new ArgumentException($"Derived type mappings for '{pair.Key}' cannot contain null entries.", nameof(value));
+                    }
+
+                    derivedTypes[i] = entry;
+                }
+
+                copy[pair.Key] = Array.AsReadOnly(derivedTypes);
+            }
+
+            _derivedTypeMappings = new ReadOnlyDictionary<Type, IReadOnlyList<TomlDerivedType>>(copy);
         }
     }
 }

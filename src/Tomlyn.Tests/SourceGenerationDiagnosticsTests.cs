@@ -149,6 +149,99 @@ public sealed class SourceGenerationDiagnosticsTests
         StringAssert.Contains("string __arg1 = default!;", generatedSource);
     }
 
+    [Test]
+    public void Generator_DoesNotReferenceInternalRuntimeHelpers_FromConsumerAssembly()
+    {
+        var source = """
+            #nullable enable
+            using System.Text.Json.Serialization;
+            using Tomlyn.Serialization;
+
+            public sealed class Root
+            {
+                [JsonPropertyName("child")]
+                public Child Child { get; } = new();
+            }
+
+            public sealed class Child
+            {
+                public string Name { get; set; } = "";
+            }
+
+            [TomlSourceGenerationOptions(PreferredObjectCreationHandling = JsonObjectCreationHandling.Populate)]
+            [TomlSerializable(typeof(Root))]
+            internal partial class Ctx : TomlSerializerContext { }
+            """;
+
+        var result = RunGeneratorTest(source);
+        var generatedSource = string.Join(Environment.NewLine, result.GeneratedSources);
+
+        Assert.That(result.Diagnostics.Any(d => d.Id == "CS0122"), Is.False);
+        StringAssert.DoesNotContain("TomlTableHeaderExtensionHelper", generatedSource);
+    }
+
+    [Test]
+    public void Generator_ReportsInvalidDerivedTypeMapping_WhenDerivedTypeIsNotAssignable()
+    {
+        var source = """
+            #nullable enable
+            using Tomlyn.Serialization;
+
+            [TomlSerializable(typeof(Animal))]
+            [TomlDerivedTypeMapping(typeof(Animal), typeof(NotAnimal), "cat")]
+            internal partial class Ctx : TomlSerializerContext { }
+
+            [TomlPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+            public abstract class Animal { }
+            public sealed class NotAnimal { }
+            """;
+
+        var diagnostics = RunGenerator(source);
+
+        Assert.That(diagnostics.Any(d => d.Id == "TOMLYN009"), Is.True);
+    }
+
+    [Test]
+    public void Generator_ReportsInvalidDerivedTypeMapping_WhenDiscriminatorIsEmpty()
+    {
+        var source = """
+            #nullable enable
+            using Tomlyn.Serialization;
+
+            [TomlSerializable(typeof(Animal))]
+            [TomlDerivedTypeMapping(typeof(Animal), typeof(Cat), "")]
+            internal partial class Ctx : TomlSerializerContext { }
+
+            [TomlPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+            public abstract class Animal { }
+            public sealed class Cat : Animal { }
+            """;
+
+        var diagnostics = RunGenerator(source);
+
+        Assert.That(diagnostics.Any(d => d.Id == "TOMLYN009"), Is.True);
+    }
+
+    [Test]
+    public void Generator_WarnsWhenDerivedTypeMappingBaseHasNoPolymorphicConfiguration()
+    {
+        var source = """
+            #nullable enable
+            using Tomlyn.Serialization;
+
+            [TomlSerializable(typeof(Animal))]
+            [TomlDerivedTypeMapping(typeof(Animal), typeof(Cat), "cat")]
+            internal partial class Ctx : TomlSerializerContext { }
+
+            public abstract class Animal { public string Name { get; set; } = ""; }
+            public sealed class Cat : Animal { public int Lives { get; set; } }
+            """;
+
+        var diagnostics = RunGenerator(source);
+
+        Assert.That(diagnostics.Any(d => d.Id == "TOMLYN010"), Is.True);
+    }
+
     private static ImmutableArray<Diagnostic> RunGenerator(string source)
         => RunGeneratorTest(source).Diagnostics;
 
