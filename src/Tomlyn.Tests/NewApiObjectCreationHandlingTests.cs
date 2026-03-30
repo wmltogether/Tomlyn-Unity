@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Text.Json.Serialization;
 using NUnit.Framework;
 using Tomlyn.Serialization;
 
@@ -25,7 +24,7 @@ public sealed class NewApiObjectCreationHandlingTests
         public List<int> Numbers { get; } = [1, 2, 3];
     }
 
-    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+    [TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
     private sealed class ReflectionPopulateRoot
     {
         public ReflectionChild Child { get; } = new();
@@ -33,18 +32,18 @@ public sealed class NewApiObjectCreationHandlingTests
         public List<int> Numbers { get; } = [1, 2, 3];
     }
 
-    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+    [TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
     private sealed class ReflectionPopulateOverrideRoot
     {
         public ReflectionChild Child { get; } = new();
 
-        [JsonObjectCreationHandling(JsonObjectCreationHandling.Replace)]
+        [TomlObjectCreationHandling(TomlObjectCreationHandling.Replace)]
         public List<int> Numbers { get; } = [1, 2, 3];
     }
 
     private sealed class ReflectionPopulateNullRoot
     {
-        [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+        [TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
         public ReflectionChild? Child { get; }
     }
 
@@ -56,11 +55,11 @@ public sealed class NewApiObjectCreationHandlingTests
 
     private sealed class ReflectionPopulateStructRoot
     {
-        [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+        [TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
         public ReflectionStructPayload Payload { get; } = new() { Value1 = 7 };
     }
 
-    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+    [TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
     private sealed class ReflectionTypePopulateStructRoot
     {
         public ReflectionStructPayload Payload { get; } = new() { Value1 = 7 };
@@ -68,19 +67,19 @@ public sealed class NewApiObjectCreationHandlingTests
 
     private sealed class ReflectionPopulateSettableStructRoot
     {
-        [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+        [TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
         public ReflectionStructPayload Payload { get; set; } = new() { Value1 = 7 };
     }
 
     private sealed class ReflectionPopulateNullableStructRoot
     {
-        [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+        [TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
         public ReflectionStructPayload? Payload { get; set; } = new() { Value1 = 7 };
     }
 
     private sealed class ReflectionPopulateImmutableRoot
     {
-        [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+        [TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
         public string Name { get; } = "before";
     }
 
@@ -96,7 +95,7 @@ public sealed class NewApiObjectCreationHandlingTests
         public int Value2 { get; set; }
     }
 
-    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+    [TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
     private sealed class ReflectionConstructorPopulateRoot
     {
         public ReflectionConstructorChild Child { get; } = new(7);
@@ -127,7 +126,7 @@ public sealed class NewApiObjectCreationHandlingTests
     {
         var options = TomlSerializerOptions.Default with
         {
-            PreferredObjectCreationHandling = JsonObjectCreationHandling.Populate,
+            PreferredObjectCreationHandling = TomlObjectCreationHandling.Populate,
         };
 
         var result = TomlSerializer.Deserialize<ReflectionReplaceRoot>(NestedToml, options);
@@ -261,7 +260,7 @@ public sealed class GeneratedReplaceObjectCreationRoot
     public List<int> Numbers { get; } = [1, 2, 3];
 }
 
-[JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+[TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
 public sealed class GeneratedPopulateObjectCreationRoot
 {
     public GeneratedObjectCreationChild Child { get; } = new();
@@ -269,12 +268,12 @@ public sealed class GeneratedPopulateObjectCreationRoot
     public List<int> Numbers { get; } = [1, 2, 3];
 }
 
-[JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+[TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
 public sealed class GeneratedPopulateOverrideObjectCreationRoot
 {
     public GeneratedObjectCreationChild Child { get; } = new();
 
-    [JsonObjectCreationHandling(JsonObjectCreationHandling.Replace)]
+    [TomlObjectCreationHandling(TomlObjectCreationHandling.Replace)]
     public List<int> Numbers { get; } = [1, 2, 3];
 }
 
@@ -285,7 +284,7 @@ public sealed class GeneratedOptionsPopulateObjectCreationRoot
     public List<int> Numbers { get; } = [1, 2, 3];
 }
 
-[JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+[TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
 public sealed class GeneratedTypePopulateStructRoot
 {
     public GeneratedStructPayload Payload { get; } = new() { Value1 = 7 };
@@ -293,25 +292,25 @@ public sealed class GeneratedTypePopulateStructRoot
 
 public sealed class GeneratedPropertyPopulateStructRoot
 {
-    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+    [TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
     public GeneratedStructPayload Payload { get; } = new() { Value1 = 7 };
 }
 
 public sealed class GeneratedPropertyPopulateSettableStructRoot
 {
-    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+    [TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
     public GeneratedStructPayload Payload { get; set; } = new() { Value1 = 7 };
 }
 
 public sealed class GeneratedPropertyPopulateNullableStructRoot
 {
-    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+    [TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
     public GeneratedStructPayload? Payload { get; set; } = new() { Value1 = 7 };
 }
 
 public sealed class GeneratedPropertyPopulateNullReferenceRoot
 {
-    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+    [TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
     public GeneratedObjectCreationChild? Child { get; }
 }
 
@@ -327,7 +326,7 @@ public sealed class GeneratedConstructorObjectCreationChild
     public int Value2 { get; set; }
 }
 
-[JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
+[TomlObjectCreationHandling(TomlObjectCreationHandling.Populate)]
 public sealed class GeneratedConstructorPopulateRoot
 {
     public GeneratedConstructorObjectCreationChild Child { get; } = new(7);
@@ -348,15 +347,9 @@ internal partial class TestTomlSerializerContextObjectCreationOverride : TomlSer
 {
 }
 
-[TomlSourceGenerationOptions(PreferredObjectCreationHandling = JsonObjectCreationHandling.Populate)]
+[TomlSourceGenerationOptions(PreferredObjectCreationHandling = TomlObjectCreationHandling.Populate)]
 [TomlSerializable(typeof(GeneratedOptionsPopulateObjectCreationRoot))]
 internal partial class TestTomlSerializerContextObjectCreationPopulateOptions : TomlSerializerContext
-{
-}
-
-[JsonSourceGenerationOptions(PreferredObjectCreationHandling = JsonObjectCreationHandling.Populate)]
-[TomlSerializable(typeof(GeneratedOptionsPopulateObjectCreationRoot))]
-internal partial class TestTomlSerializerContextJsonObjectCreationPopulateOptions : TomlSerializerContext
 {
 }
 
@@ -424,20 +417,7 @@ public sealed class NewApiSourceGenerationObjectCreationHandlingTests
         Assert.That(result, Is.Not.Null);
         Assert.That(result!.Child.Value, Is.EqualTo(42));
         CollectionAssert.AreEqual(new[] { 1, 2, 3, 4, 5 }, result.Numbers);
-        Assert.That(context.Options.PreferredObjectCreationHandling, Is.EqualTo(JsonObjectCreationHandling.Populate));
-    }
-
-    [Test]
-    public void GeneratedContext_JsonSourceGenerationOptions_PopulateOptionIsApplied()
-    {
-        var context = TestTomlSerializerContextJsonObjectCreationPopulateOptions.Default;
-
-        var result = TomlSerializer.Deserialize(NestedToml, context.GeneratedOptionsPopulateObjectCreationRoot);
-
-        Assert.That(result, Is.Not.Null);
-        Assert.That(result!.Child.Value, Is.EqualTo(42));
-        CollectionAssert.AreEqual(new[] { 1, 2, 3, 4, 5 }, result.Numbers);
-        Assert.That(context.Options.PreferredObjectCreationHandling, Is.EqualTo(JsonObjectCreationHandling.Populate));
+        Assert.That(context.Options.PreferredObjectCreationHandling, Is.EqualTo(TomlObjectCreationHandling.Populate));
     }
 
     [Test]

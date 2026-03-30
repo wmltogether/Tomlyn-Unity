@@ -1,6 +1,6 @@
 {
     "name": "com.tomlyn-unity",
-    "version": "2.0.0",
+    "version": "2.3.0",
     "displayName": "com.tomlyn-unity",
     "description": "Tomlyn is a high-performance .NET TOML 1.1 parser, round-trippable syntax tree, and System.Text.Json-style object serializer - NativeAOT ready.",
     "license": "BSD 2-Clause Simplified License",

@@ -1,12 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Text.Json.Serialization;
 using NUnit.Framework;
 using Tomlyn.Serialization;
 
 namespace Tomlyn.Tests;
 
-[TomlSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[TomlSourceGenerationOptions(PropertyNamingPolicy = TomlKnownNamingPolicy.CamelCase)]
 [TomlSerializable(typeof(GeneratedCrossProjectAnimal))]
 [TomlSerializable(typeof(GeneratedCrossProjectEnvelope))]
 [TomlDerivedTypeMapping(typeof(GeneratedCrossProjectAnimal), typeof(GeneratedCrossProjectCat), "cat")]
@@ -36,7 +35,7 @@ public sealed class GeneratedCrossProjectEnvelope
     public List<GeneratedCrossProjectAnimal> Animals { get; set; } = [];
 }
 
-[TomlSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[TomlSourceGenerationOptions(PropertyNamingPolicy = TomlKnownNamingPolicy.CamelCase)]
 [TomlSerializable(typeof(GeneratedMappedShape))]
 [TomlDerivedTypeMapping(typeof(GeneratedMappedShape), typeof(GeneratedMappedCircle))]
 [TomlDerivedTypeMapping(typeof(GeneratedMappedShape), typeof(GeneratedMappedSquare), "square")]
@@ -60,7 +59,7 @@ public sealed class GeneratedMappedSquare : GeneratedMappedShape
     public double Side { get; set; }
 }
 
-[TomlSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[TomlSourceGenerationOptions(PropertyNamingPolicy = TomlKnownNamingPolicy.CamelCase)]
 [TomlSerializable(typeof(GeneratedPreferredAnimal))]
 [TomlDerivedTypeMapping(typeof(GeneratedPreferredAnimal), typeof(GeneratedMappedFox), "fox")]
 [TomlDerivedTypeMapping(typeof(GeneratedPreferredAnimal), typeof(GeneratedIgnoredDog), "cat")]
@@ -90,7 +89,7 @@ public sealed class GeneratedIgnoredDog : GeneratedPreferredAnimal
     public bool GoodBoy { get; set; }
 }
 
-[TomlSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[TomlSourceGenerationOptions(PropertyNamingPolicy = TomlKnownNamingPolicy.CamelCase)]
 [TomlSerializable(typeof(GeneratedMappedNumberShape))]
 [TomlDerivedTypeMapping(typeof(GeneratedMappedNumberShape), typeof(GeneratedMappedNumberCircle), 1)]
 [TomlDerivedTypeMapping(typeof(GeneratedMappedNumberShape), typeof(GeneratedMappedNumberSquare), 2)]

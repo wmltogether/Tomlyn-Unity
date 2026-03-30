@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using Newtonsoft.Json;
 using NUnit.Framework;
 using Tomlyn.Model;
 using Tomlyn.Serialization;
@@ -39,18 +38,18 @@ public sealed class SingleOrArrayCollectionHolder
     }
 
     [TomlSingleOrArray]
-    [JsonPropertyName("rid")]
+    [JsonProperty("rid")]
     public List<string> RuntimeIdentifiers { get; }
 }
 
 public sealed class SingleOrArraySettableCollectionHolder
 {
     [TomlSingleOrArray]
-    [JsonPropertyName("rid")]
+    [JsonProperty("rid")]
     public List<string> RuntimeIdentifiers { get; set; } = new() { "existing" };
 }
 
-[TomlSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[TomlSourceGenerationOptions(PropertyNamingPolicy = TomlKnownNamingPolicy.CamelCase)]
 [TomlSerializable(typeof(GeneratedCollectionHolder))]
 [TomlSerializable(typeof(DottedKeyDictionaryHolder))]
 [TomlSerializable(typeof(SingleOrArrayCollectionHolder))]
@@ -59,7 +58,7 @@ internal partial class TestTomlCollectionsContext : TomlSerializerContext
 {
 }
 
-[TomlSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower)]
+[TomlSourceGenerationOptions(PropertyNamingPolicy = TomlKnownNamingPolicy.SnakeCaseLower)]
 [TomlSerializable(typeof(Issue117ArrayHolder))]
 internal partial class TestTomlSnakeCaseCollectionsContext : TomlSerializerContext
 {
@@ -137,7 +136,7 @@ public class NewApiCollectionTests
     {
         var options = new TomlSerializerOptions
         {
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNamingPolicy = TomlNamingPolicy.SnakeCaseLower,
         };
 
         var result = TomlSerializer.Deserialize<Issue117ArrayHolder>(CreateItemsToml(itemCount), options);

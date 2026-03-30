@@ -1,6 +1,6 @@
 using System;
-using System.Text.Json.Serialization;
 using NUnit.Framework;
+using Tomlyn.Serialization;
 
 namespace Tomlyn.Tests;
 
@@ -61,7 +61,7 @@ public sealed class NewApiOptionsValidationTests
         {
             _ = TomlSerializerOptions.Default with
             {
-                PreferredObjectCreationHandling = (JsonObjectCreationHandling)99,
+                PreferredObjectCreationHandling = (TomlObjectCreationHandling)99,
             };
         });
 

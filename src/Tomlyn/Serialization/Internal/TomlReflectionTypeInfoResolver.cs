@@ -404,15 +404,15 @@ internal static class TomlReflectionTypeInfoResolver
         }
     }
 
-    private static JsonObjectCreationHandling GetObjectCreationHandling(Type type, TomlSerializerOptions options)
+    private static TomlObjectCreationHandling GetObjectCreationHandling(Type type, TomlSerializerOptions options)
     {
-        var attribute = type.GetCustomAttribute<JsonObjectCreationHandlingAttribute>(inherit: true);
+        var attribute = type.GetCustomAttribute<TomlObjectCreationHandlingAttribute>(inherit: true);
         return attribute?.Handling ?? options.PreferredObjectCreationHandling;
     }
 
-    private static JsonObjectCreationHandling GetObjectCreationHandling(MemberInfo member, JsonObjectCreationHandling declaringTypeHandling)
+    private static TomlObjectCreationHandling GetObjectCreationHandling(MemberInfo member, TomlObjectCreationHandling declaringTypeHandling)
     {
-        var attribute = member.GetCustomAttribute<JsonObjectCreationHandlingAttribute>(inherit: true);
+        var attribute = member.GetCustomAttribute<TomlObjectCreationHandlingAttribute>(inherit: true);
         if (attribute is not null)
         {
             return attribute.Handling;
@@ -423,7 +423,7 @@ internal static class TomlReflectionTypeInfoResolver
 
     private static bool HasExplicitObjectCreationHandling(MemberInfo member)
     {
-        return member.IsDefined(typeof(JsonObjectCreationHandlingAttribute), inherit: true);
+        return member.IsDefined(typeof(TomlObjectCreationHandlingAttribute), inherit: true);
     }
 
     private static bool HasSingleOrArrayAttribute(MemberInfo member)
@@ -504,7 +504,7 @@ internal static class TomlReflectionTypeInfoResolver
         int Order,
         TomlIgnoreCondition? WriteIgnoreCondition,
         object? DefaultValue,
-        JsonObjectCreationHandling ObjectCreationHandling,
+        TomlObjectCreationHandling ObjectCreationHandling,
         bool HasExplicitObjectCreationHandling,
         bool HasSingleOrArray,
         bool IsRequired,
@@ -828,7 +828,7 @@ internal static class TomlReflectionTypeInfoResolver
                         seen[memberIndex] = true;
                     }
 
-                    if (member.Setter is null && member.ObjectCreationHandling != JsonObjectCreationHandling.Populate && !member.HasSingleOrArray)
+                    if (member.Setter is null && member.ObjectCreationHandling != TomlObjectCreationHandling.Populate && !member.HasSingleOrArray)
                     {
                         reader.Skip();
                         continue;
@@ -882,7 +882,7 @@ internal static class TomlReflectionTypeInfoResolver
                 return ReadSingleOrArrayMemberValue(reader, instance, member);
             }
 
-            if (member.ObjectCreationHandling != JsonObjectCreationHandling.Populate)
+            if (member.ObjectCreationHandling != TomlObjectCreationHandling.Populate)
             {
                 return ReadMemberValue(reader, member);
             }
@@ -909,7 +909,7 @@ internal static class TomlReflectionTypeInfoResolver
                 if (member.HasExplicitObjectCreationHandling)
                 {
                     throw reader.CreateException(
-                        $"Member '{member.Member.Name}' on '{Type.FullName}' uses {nameof(JsonObjectCreationHandling)}.{nameof(JsonObjectCreationHandling.Populate)} but requires a setter because '{member.MemberType.FullName}' is a value type.");
+                        $"Member '{member.Member.Name}' on '{Type.FullName}' uses {nameof(TomlObjectCreationHandling)}.{nameof(TomlObjectCreationHandling.Populate)} but requires a setter because '{member.MemberType.FullName}' is a value type.");
                 }
 
                 reader.Skip();
@@ -945,7 +945,7 @@ internal static class TomlReflectionTypeInfoResolver
                     if (member.HasExplicitObjectCreationHandling)
                     {
                         throw reader.CreateException(
-                            $"Member '{member.Member.Name}' on '{Type.FullName}' uses {nameof(JsonObjectCreationHandling)}.{nameof(JsonObjectCreationHandling.Populate)} but '{member.MemberType.FullName}' doesn't support populating.");
+                            $"Member '{member.Member.Name}' on '{Type.FullName}' uses {nameof(TomlObjectCreationHandling)}.{nameof(TomlObjectCreationHandling.Populate)} but '{member.MemberType.FullName}' doesn't support populating.");
                     }
 
                     return existingValue;
@@ -960,7 +960,7 @@ internal static class TomlReflectionTypeInfoResolver
         private object? ReadSingleOrArrayMemberValue(TomlReader reader, object instance, MemberModel member)
         {
             var existingValue = member.Getter(instance);
-            var shouldPopulateExisting = existingValue is not null && (member.Setter is null || member.ObjectCreationHandling == JsonObjectCreationHandling.Populate);
+            var shouldPopulateExisting = existingValue is not null && (member.Setter is null || member.ObjectCreationHandling == TomlObjectCreationHandling.Populate);
 
             if (reader.TokenType == TomlTokenType.StartArray)
             {

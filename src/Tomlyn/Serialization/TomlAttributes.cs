@@ -219,3 +219,27 @@ public sealed class TomlDerivedTypeAttribute : TomlAttribute
     /// </summary>
     public string? Discriminator { get; }
 }
+
+/// <summary>
+/// Determines how deserialization handles object creation for fields or properties.
+/// </summary>
+[System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Field |
+                       System.AttributeTargets.Interface | System.AttributeTargets.Property |
+                       System.AttributeTargets.Struct, AllowMultiple=false)]
+public sealed class TomlObjectCreationHandlingAttribute : TomlAttribute
+{
+    /// <summary>
+    /// Determines how deserialization will handle object creation for fields or properties.
+    /// </summary>
+    /// <param name="handling"></param>
+    public TomlObjectCreationHandlingAttribute(TomlObjectCreationHandling handling)
+    {
+        Handling = handling;
+    }
+
+    /// <summary>
+    /// Gets the configuration to use when deserializing members.
+    /// </summary>
+    public TomlObjectCreationHandling Handling { get; }
+
+}

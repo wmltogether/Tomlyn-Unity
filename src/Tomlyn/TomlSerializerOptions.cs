@@ -5,8 +5,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Tomlyn.Helpers;
 using Tomlyn.Serialization;
 
@@ -77,29 +75,29 @@ public sealed record TomlSerializerOptions
     /// <summary>
     /// Gets or sets the policy used to convert CLR property names.
     /// </summary>
-    public JsonNamingPolicy? PropertyNamingPolicy { get; init; }
+    public TomlNamingPolicy? PropertyNamingPolicy { get; init; }
 
     /// <summary>
     /// Gets or sets the policy used to convert dictionary keys during serialization.
     /// </summary>
-    public JsonNamingPolicy? DictionaryKeyPolicy { get; init; }
+    public TomlNamingPolicy? DictionaryKeyPolicy { get; init; }
 
     /// <summary>
     /// Gets or sets the preferred object creation handling when deserializing object and collection members.
     /// </summary>
-    public JsonObjectCreationHandling PreferredObjectCreationHandling
+    public TomlObjectCreationHandling PreferredObjectCreationHandling
     {
         get;
         init
         {
-            if (value is not JsonObjectCreationHandling.Replace and not JsonObjectCreationHandling.Populate)
+            if (value is not TomlObjectCreationHandling.Replace and not TomlObjectCreationHandling.Populate)
             {
                 throw new ArgumentOutOfRangeException(nameof(value), value, "Preferred object creation handling must be Replace or Populate.");
             }
 
             field = value;
         }
-    } = JsonObjectCreationHandling.Replace;
+    } = TomlObjectCreationHandling.Replace;
 
     /// <summary>
     /// Gets or sets a value indicating whether property name matching is case-insensitive.

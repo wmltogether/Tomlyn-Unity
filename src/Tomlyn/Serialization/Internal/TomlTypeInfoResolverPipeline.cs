@@ -7,7 +7,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
-using System.Text.Json.Serialization;
+using Newtonsoft.Json;
 using Tomlyn.Helpers;
 using Tomlyn.Serialization;
 

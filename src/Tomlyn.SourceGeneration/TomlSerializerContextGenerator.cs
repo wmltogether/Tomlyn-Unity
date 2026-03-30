@@ -4,11 +4,10 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Tomlyn.Serialization;
 
 namespace Tomlyn.SourceGeneration;
 
@@ -98,9 +97,7 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
     private const string TomlSerializerContextMetadataName = "Tomlyn.Serialization.TomlSerializerContext";
     private const string TomlSerializableAttributeMetadataName = "Tomlyn.Serialization.TomlSerializableAttribute";
     private const string TomlDerivedTypeMappingAttributeMetadataName = "Tomlyn.Serialization.TomlDerivedTypeMappingAttribute";
-    private const string JsonSerializableAttributeMetadataName = "System.Text.Json.Serialization.JsonSerializableAttribute";
-    private const string JsonSourceGenerationOptionsAttributeMetadataName = "System.Text.Json.Serialization.JsonSourceGenerationOptionsAttribute";
-    private const string JsonObjectCreationHandlingAttributeMetadataName = "System.Text.Json.Serialization.JsonObjectCreationHandlingAttribute";
+    private const string TomlObjectCreationHandlingAttributeMetadataName = "Tomlyn.Serialization.TomlObjectCreationHandlingAttribute";
     private const string TomlSourceGenerationOptionsAttributeMetadataName = "Tomlyn.Serialization.TomlSourceGenerationOptionsAttribute";
     private const string TomlConverterMetadataName = "Tomlyn.Serialization.TomlConverter";
     private const string TomlSingleOrArrayAttributeMetadataName = "Tomlyn.Serialization.TomlSingleOrArrayAttribute";
@@ -279,12 +276,6 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
                 continue;
             }
 
-            if (IsJsonSourceGenerationOptionsAttribute(attribute))
-            {
-                ApplyJsonSourceGenerationOptionsAttribute(attribute, options);
-                continue;
-            }
-
             if (IsTomlSourceGenerationOptionsAttribute(attribute))
             {
                 ApplyTomlSourceGenerationOptionsAttribute(attribute, options);
@@ -348,7 +339,7 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
         builder.AppendLine("#nullable enable");
         builder.AppendLine("using System;");
         builder.AppendLine("using System.Collections.Generic;");
-        builder.AppendLine("using System.Text.Json;");
+        builder.AppendLine("using Newtonsoft.Json;");
         builder.AppendLine("using Tomlyn;");
         builder.AppendLine("using Tomlyn.Serialization;");
         builder.AppendLine();
@@ -430,7 +421,7 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
             builder.Append("        options = options with { DictionaryKeyPolicy = ").Append(model.Options.DictionaryKeyPolicyExpression).AppendLine(" };");
         }
 
-        if (model.Options.PreferredObjectCreationHandling is not null && TryGetJsonObjectCreationHandlingExpression(model.Options.PreferredObjectCreationHandling.Value, out var objectCreationHandlingExpression))
+        if (model.Options.PreferredObjectCreationHandling is not null && TryGetTomlObjectCreationHandlingExpression(model.Options.PreferredObjectCreationHandling.Value, out var objectCreationHandlingExpression))
         {
             builder.Append("        options = options with { PreferredObjectCreationHandling = ").Append(objectCreationHandlingExpression).AppendLine(" };");
         }
@@ -1855,7 +1846,7 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
         {
             ObjectCreationHandlingKind.Replace => null,
             ObjectCreationHandlingKind.Populate => "true",
-            _ => "Options.PreferredObjectCreationHandling == global::System.Text.Json.Serialization.JsonObjectCreationHandling.Populate",
+            _ => "Options.PreferredObjectCreationHandling == global::Tomlyn.Serialization.TomlObjectCreationHandling.Populate",
         };
     }
 
@@ -2913,9 +2904,7 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
         {
             var attrName = attr.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             if (attrName == "global::Tomlyn.Serialization.TomlPolymorphicAttribute" ||
-                attrName == "global::System.Text.Json.Serialization.JsonPolymorphicAttribute" ||
-                attrName == "global::Tomlyn.Serialization.TomlDerivedTypeAttribute" ||
-                     attrName == "global::System.Text.Json.Serialization.JsonDerivedTypeAttribute")
+                attrName == "global::Tomlyn.Serialization.TomlDerivedTypeAttribute")
             {
                 return true;
             }
@@ -3241,7 +3230,7 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
                 var annotated = publicConstructors
                     .Where(static ctor =>
                         HasAttribute(ctor, "Tomlyn.Serialization.TomlConstructorAttribute") ||
-                        HasAttribute(ctor, "System.Text.Json.Serialization.JsonConstructorAttribute"))
+                        HasAttribute(ctor, "Newtonsoft.Json.JsonConstructorAttribute"))
                     .ToArray();
 
                 if (annotated.Length > 1)
@@ -3407,7 +3396,7 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
             }
 
             if (!HasAttribute(member, "Tomlyn.Serialization.TomlIncludeAttribute") &&
-                !HasAttribute(member, "System.Text.Json.Serialization.JsonIncludeAttribute"))
+                !HasAttribute(member, "Newtonsoft.Json.JsonPropertyAttribute"))
             {
                 continue;
             }
@@ -3547,21 +3536,6 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
                     }
                 }
             }
-            else if (attrName == "global::System.Text.Json.Serialization.JsonPolymorphicAttribute")
-            {
-                foreach (var kvp in attr.NamedArguments)
-                {
-                    if (kvp.Key == "TypeDiscriminatorPropertyName" && kvp.Value.Value is string s && !string.IsNullOrEmpty(s))
-                    {
-                        jsonDiscriminatorPropertyName = s;
-                    }
-                    else if (kvp.Key == "UnknownDerivedTypeHandling" && kvp.Value.Value is int intVal)
-                    {
-                        // JsonUnknownDerivedTypeHandling: FailSerialization=0, FallBackToBaseType=1, FallBackToNearestAncestor=2
-                        jsonUnknownHandling = intVal == 1 ? 1 : 0; // 1 => FallBackToBaseType, anything else => Fail
-                    }
-                }
-            }
         }
 
         var derived = ImmutableArray.CreateBuilder<PolymorphicDerivedType>();
@@ -3652,44 +3626,6 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
                     }
                     continue;
                 }
-            }
-            else if (attrName == "global::System.Text.Json.Serialization.JsonDerivedTypeAttribute")
-            {
-                if (attr.ConstructorArguments.Length < 1 ||
-                    attr.ConstructorArguments[0].Kind != TypedConstantKind.Type ||
-                    attr.ConstructorArguments[0].Value is not ITypeSymbol derivedType)
-                {
-                    if (reportDiagnostics)
-                    {
-                        context.ReportDiagnostic(Diagnostic.Create(
-                            InvalidPolymorphismConfiguration,
-                            model.ContextSymbol.Locations.FirstOrDefault(),
-                            type.ToDisplayString(),
-                            "JsonDerivedTypeAttribute must specify a derived type."));
-                    }
-                    continue;
-                }
-
-                if (attr.ConstructorArguments.Length < 2 || attr.ConstructorArguments[1].IsNull)
-                {
-                    TryAddLowerPrecedenceDefaultDerivedType(derivedType);
-                    continue;
-                }
-
-                var discriminatorObj = attr.ConstructorArguments[1].Value;
-                var discriminator = discriminatorObj switch
-                {
-                    string s => s,
-                    IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
-                    _ => discriminatorObj?.ToString() ?? string.Empty,
-                };
-
-                if (string.IsNullOrEmpty(discriminator))
-                {
-                    continue;
-                }
-
-                TryAddLowerPrecedenceDerivedType(derivedType, discriminator);
             }
         }
 
@@ -3897,14 +3833,13 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
                    IFieldSymbol field when field.IsRequired => true,
                    _ => false,
                } ||
-               HasAttribute(member, "Tomlyn.Serialization.TomlRequiredAttribute") ||
-               HasAttribute(member, "System.Text.Json.Serialization.JsonRequiredAttribute");
+               HasAttribute(member, "Tomlyn.Serialization.TomlRequiredAttribute");
     }
 
     private static bool IsExtensionData(ISymbol member)
     {
         return HasAttribute(member, "Tomlyn.Serialization.TomlExtensionDataAttribute") ||
-               HasAttribute(member, "System.Text.Json.Serialization.JsonExtensionDataAttribute");
+               HasAttribute(member, "Newtonsoft.Json.JsonExtensionDataAttribute");
     }
 
     private static bool TryGetExtensionDataValueType(ITypeSymbol type, out ITypeSymbol valueType)
@@ -4322,7 +4257,7 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
                 return tomlName;
             }
 
-            if (attrName == "global::System.Text.Json.Serialization.JsonPropertyNameAttribute" &&
+            if (attrName == "global::Newtonsoft.Json.JsonPropertyAttribute" &&
                 attr.ConstructorArguments.Length == 1 &&
                 attr.ConstructorArguments[0].Value is string jsonName)
             {
@@ -4342,7 +4277,7 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
     {
         foreach (var attr in symbol.GetAttributes())
         {
-            if (attr.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) != "global::" + JsonObjectCreationHandlingAttributeMetadataName)
+            if (attr.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) != "global::" + TomlObjectCreationHandlingAttributeMetadataName)
             {
                 continue;
             }
@@ -4388,11 +4323,14 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
             {
                 tomlOrder = toml;
             }
-            else if (attrName == "global::System.Text.Json.Serialization.JsonPropertyOrderAttribute" &&
-                     attr.ConstructorArguments.Length == 1 &&
-                     attr.ConstructorArguments[0].Value is int json)
+            else if (attrName == "global::Newtonsoft.Json.JsonPropertyAttribute"
+                     )
             {
-                jsonOrder = json;
+                var order = attr.NamedArguments.FirstOrDefault(a => a.Key == "Order").Value;
+                if (order.Value is int orderValue)
+                {
+                    jsonOrder = orderValue;
+                }
             }
         }
 
@@ -4401,13 +4339,13 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
 
     private static bool TryConvertKnownName(string name, string namingPolicyExpression, out string converted)
     {
-        JsonNamingPolicy? policy = namingPolicyExpression switch
+        TomlNamingPolicy? policy = namingPolicyExpression switch
         {
-            "global::System.Text.Json.JsonNamingPolicy.CamelCase" => JsonNamingPolicy.CamelCase,
-            "global::System.Text.Json.JsonNamingPolicy.SnakeCaseLower" => JsonNamingPolicy.SnakeCaseLower,
-            "global::System.Text.Json.JsonNamingPolicy.SnakeCaseUpper" => JsonNamingPolicy.SnakeCaseUpper,
-            "global::System.Text.Json.JsonNamingPolicy.KebabCaseLower" => JsonNamingPolicy.KebabCaseLower,
-            "global::System.Text.Json.JsonNamingPolicy.KebabCaseUpper" => JsonNamingPolicy.KebabCaseUpper,
+            "global::Tomlyn.Serialization.TomlNamingPolicy.CamelCase" => TomlNamingPolicy.CamelCase,
+            "global::Tomlyn.Serialization.TomlNamingPolicy.SnakeCaseLower" => TomlNamingPolicy.SnakeCaseLower,
+            "global::Tomlyn.Serialization.TomlNamingPolicy.SnakeCaseUpper" => TomlNamingPolicy.SnakeCaseUpper,
+            "global::Tomlyn.Serialization.TomlNamingPolicy.KebabCaseLower" => TomlNamingPolicy.KebabCaseLower,
+            "global::Tomlyn.Serialization.TomlNamingPolicy.KebabCaseUpper" => TomlNamingPolicy.KebabCaseUpper,
             _ => null,
         };
 
@@ -4433,7 +4371,8 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
             {
                 toml = TomlIgnoreAttributeModel.From(attr);
             }
-            else if (attrName == "global::System.Text.Json.Serialization.JsonIgnoreAttribute")
+            else if (attrName == "global::Newtonsoft.Json.JsonIgnoreAttribute" ||
+                     attrName == "global::System.NonSerializedAttribute")
             {
                 json = JsonIgnoreAttributeModel.From(attr);
             }
@@ -4452,14 +4391,7 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
 
         if (json is not null)
         {
-            var condition = json.Value.Condition ?? JsonIgnoreCondition.Always;
-            return condition switch
-            {
-                JsonIgnoreCondition.Never => new IgnoreBehavior(ignoreAlways: false, writeIgnore: WriteIgnoreKind.None),
-                JsonIgnoreCondition.WhenWritingNull => new IgnoreBehavior(ignoreAlways: false, writeIgnore: WriteIgnoreKind.WhenWritingNull),
-                JsonIgnoreCondition.WhenWritingDefault => new IgnoreBehavior(ignoreAlways: false, writeIgnore: WriteIgnoreKind.WhenWritingDefault),
-                _ => new IgnoreBehavior(ignoreAlways: true, writeIgnore: WriteIgnoreKind.None),
-            };
+            return new IgnoreBehavior(ignoreAlways: true, writeIgnore: WriteIgnoreKind.None);
         }
 
         return new IgnoreBehavior(ignoreAlways: false, writeIgnore: WriteIgnoreKind.None);
@@ -4491,25 +4423,14 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
 
     private readonly struct JsonIgnoreAttributeModel
     {
-        public JsonIgnoreAttributeModel(JsonIgnoreCondition? condition)
+        public JsonIgnoreAttributeModel()
         {
-            Condition = condition;
         }
-
-        public JsonIgnoreCondition? Condition { get; }
 
         public static JsonIgnoreAttributeModel From(AttributeData attribute)
         {
-            foreach (var namedArg in attribute.NamedArguments)
-            {
-                if (namedArg.Key == "Condition" && namedArg.Value.Value is int value)
-                {
-                    return new JsonIgnoreAttributeModel((JsonIgnoreCondition)value);
-                }
-            }
-
             // Default: Always.
-            return new JsonIgnoreAttributeModel(null);
+            return new JsonIgnoreAttributeModel();
         }
     }
 
@@ -4639,7 +4560,7 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
     }
 
     private static bool IsJsonSerializableAttribute(AttributeData attribute)
-        => attribute.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::" + JsonSerializableAttributeMetadataName;
+        => attribute.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::" + TomlSerializableAttributeMetadataName;
 
     private static bool IsTomlSerializableAttribute(AttributeData attribute)
         => attribute.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::" + TomlSerializableAttributeMetadataName;
@@ -4690,9 +4611,6 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
 
         return null;
     }
-
-    private static bool IsJsonSourceGenerationOptionsAttribute(AttributeData attribute)
-        => attribute.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::" + JsonSourceGenerationOptionsAttributeMetadataName;
 
     private static bool IsTomlSourceGenerationOptionsAttribute(AttributeData attribute)
         => attribute.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::" + TomlSourceGenerationOptionsAttributeMetadataName;
@@ -4903,7 +4821,7 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
             model.Options.IndentSize = null;
         }
 
-        ValidateEnumOption(context, model, "PreferredObjectCreationHandling", model.Options.PreferredObjectCreationHandling, TryGetJsonObjectCreationHandlingExpression, v => model.Options.PreferredObjectCreationHandling = v);
+        ValidateEnumOption(context, model, "PreferredObjectCreationHandling", model.Options.PreferredObjectCreationHandling, TryGetTomlObjectCreationHandlingExpression, v => model.Options.PreferredObjectCreationHandling = v);
         ValidateEnumOption(context, model, "NewLine", model.Options.NewLine, TryGetTomlNewLineKindExpression, v => model.Options.NewLine = v);
         ValidateEnumOption(context, model, "DefaultIgnoreCondition", model.Options.DefaultIgnoreCondition, TryGetTomlIgnoreConditionExpression, v => model.Options.DefaultIgnoreCondition = v);
         ValidateEnumOption(context, model, "DuplicateKeyHandling", model.Options.DuplicateKeyHandling, TryGetTomlDuplicateKeyHandlingExpression, v => model.Options.DuplicateKeyHandling = v);
@@ -4982,14 +4900,14 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
             return null;
         }
 
-        var policy = (JsonKnownNamingPolicy)value;
+        var policy = (TomlKnownNamingPolicy)value;
         return policy switch
         {
-            JsonKnownNamingPolicy.CamelCase => "global::System.Text.Json.JsonNamingPolicy.CamelCase",
-            JsonKnownNamingPolicy.SnakeCaseLower => "global::System.Text.Json.JsonNamingPolicy.SnakeCaseLower",
-            JsonKnownNamingPolicy.SnakeCaseUpper => "global::System.Text.Json.JsonNamingPolicy.SnakeCaseUpper",
-            JsonKnownNamingPolicy.KebabCaseLower => "global::System.Text.Json.JsonNamingPolicy.KebabCaseLower",
-            JsonKnownNamingPolicy.KebabCaseUpper => "global::System.Text.Json.JsonNamingPolicy.KebabCaseUpper",
+            TomlKnownNamingPolicy.CamelCase => "global::Tomlyn.Serialization.TomlNamingPolicy.CamelCase",
+            TomlKnownNamingPolicy.SnakeCaseLower => "global::Tomlyn.Serialization.TomlNamingPolicy.SnakeCaseLower",
+            TomlKnownNamingPolicy.SnakeCaseUpper => "global::Tomlyn.Serialization.TomlNamingPolicy.SnakeCaseUpper",
+            TomlKnownNamingPolicy.KebabCaseLower => "global::Tomlyn.Serialization.TomlNamingPolicy.KebabCaseLower",
+            TomlKnownNamingPolicy.KebabCaseUpper => "global::Tomlyn.Serialization.TomlNamingPolicy.KebabCaseUpper",
             _ => null,
         };
     }
@@ -5007,12 +4925,12 @@ public sealed class TomlSerializerContextGenerator : IIncrementalGenerator
         return expression is not null;
     }
 
-    private static bool TryGetJsonObjectCreationHandlingExpression(int value, out string expression)
+    private static bool TryGetTomlObjectCreationHandlingExpression(int value, out string expression)
     {
         expression = value switch
         {
-            0 => "global::System.Text.Json.Serialization.JsonObjectCreationHandling.Replace",
-            1 => "global::System.Text.Json.Serialization.JsonObjectCreationHandling.Populate",
+            0 => "global::Tomlyn.Serialization.TomlObjectCreationHandling.Replace",
+            1 => "global::Tomlyn.Serialization.TomlObjectCreationHandling.Populate",
             _ => null!,
         };
 

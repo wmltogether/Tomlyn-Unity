@@ -1,18 +1,17 @@
 using System.Collections.Generic;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using NUnit.Framework;
 using Tomlyn.Model;
 using Tomlyn.Serialization;
+using Newtonsoft.Json;
 
 namespace Tomlyn.Tests;
 
 public sealed class OutOfOrderSubtableRoot
 {
-    [JsonPropertyName("msbuild")]
+    [JsonProperty("msbuild")]
     public OutOfOrderSubtableMsBuild MSBuild { get; } = new();
 
-    [JsonPropertyName("github")]
+    [JsonProperty("github")]
     public OutOfOrderSubtableGitHub GitHub { get; } = new();
 }
 
@@ -31,8 +30,8 @@ public sealed class OutOfOrderSubtableGitHub
 }
 
 [TomlSourceGenerationOptions(
-    PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
-    PreferredObjectCreationHandling = JsonObjectCreationHandling.Populate)]
+    PropertyNamingPolicy = TomlKnownNamingPolicy.SnakeCaseLower,
+    PreferredObjectCreationHandling = TomlObjectCreationHandling.Populate)]
 [TomlSerializable(typeof(OutOfOrderSubtableRoot))]
 internal partial class TestOutOfOrderSubtableContext : TomlSerializerContext
 {
@@ -58,8 +57,8 @@ public class NewApiOutOfOrderSubtableTests
     {
         var result = TomlSerializer.Deserialize<OutOfOrderSubtableRoot>(SampleToml, new TomlSerializerOptions
         {
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-            PreferredObjectCreationHandling = JsonObjectCreationHandling.Populate,
+            PropertyNamingPolicy = TomlNamingPolicy.SnakeCaseLower,
+            PreferredObjectCreationHandling = TomlObjectCreationHandling.Populate,
             SourceName = "repro.toml",
         });
 
@@ -88,7 +87,7 @@ public class NewApiOutOfOrderSubtableTests
     {
         var result = TomlSerializer.Deserialize<Dictionary<string, object>>(SampleToml, new TomlSerializerOptions
         {
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNamingPolicy = TomlNamingPolicy.SnakeCaseLower,
             SourceName = "repro.toml",
         });
 
